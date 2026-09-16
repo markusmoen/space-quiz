@@ -586,6 +586,8 @@
     let answerLocked = false;
     let timedModeEnabled = false;
     let questionTimeLimitSeconds = 12;
+    let nextTimedModeEnabled = timedModeEnabled;
+    let nextQuestionTimeLimitSeconds = questionTimeLimitSeconds;
     let questionTimerId = null;
     let questionAdvanceTimeoutId = null;
     let timerDeadlineMs = 0;
@@ -678,13 +680,8 @@
       }, 200);
     }
 
-    function setTimedMode(enabled) {
-      timedModeEnabled = enabled;
-      if (!timedModeEnabled) {
-        stopQuestionTimer();
-      } else if (!answerLocked) {
-        startQuestionTimer();
-      }
+    function clampQuestionTimeLimit(value) {
+      return Math.max(3, Math.min(60, value));
     }
 
     function renderQuestion() {
@@ -700,7 +697,7 @@
             <span>Score: ${score}</span>
           </div>
           <label class="mode-toggle">
-            <input id="timed-toggle" type="checkbox" ${timedModeEnabled ? "checked" : ""} />
+            <input id="timed-toggle" type="checkbox" ${timedModeEnabled ? "checked" : ""} disabled />
             <span>Timed Challenge (${questionTimeLimitSeconds}s)</span>
           </label>
           <div class="progress-track" aria-label="Quiz progress">
@@ -727,14 +724,6 @@
       quizCard.querySelectorAll(".answer-btn").forEach((btn) => {
         btn.addEventListener("click", () => handleAnswer(btn));
         btn.addEventListener("keydown", handleAnswerKeyControls);
-      });
-
-      const timedToggle = document.getElementById("timed-toggle");
-      timedToggle?.addEventListener("change", (event) => {
-        setTimedMode(event.currentTarget.checked);
-        const timerWrap = quizCard.querySelector(".timer-wrap");
-        timerWrap?.classList.toggle("hidden", !timedModeEnabled);
-        updateTimerDisplay(questionTimeLimitSeconds);
       });
 
       if (timedModeEnabled) {
@@ -842,8 +831,12 @@
             <span>${score} / ${questions.length}</span>
           </div>
           <label class="mode-toggle">
-            <input id="timed-toggle-results" type="checkbox" ${timedModeEnabled ? "checked" : ""} />
-            <span>Timed Challenge (${questionTimeLimitSeconds}s)</span>
+            <input id="timed-toggle-results" type="checkbox" ${nextTimedModeEnabled ? "checked" : ""} />
+            <span>Timed Challenge for next run</span>
+          </label>
+          <label class="mode-toggle">
+            <span>Seconds per question (3-60):</span>
+            <input id="time-limit-input" type="number" min="3" max="60" step="1" value="${nextQuestionTimeLimitSeconds}" />
           </label>
           <div class="progress-track" aria-label="Quiz progress">
             <div class="progress-fill" style="width: 100%"></div>
@@ -864,7 +857,14 @@
       restartBtn.addEventListener("click", restartQuiz);
       const timedToggleResults = document.getElementById("timed-toggle-results");
       timedToggleResults?.addEventListener("change", (event) => {
-        setTimedMode(event.currentTarget.checked);
+        nextTimedModeEnabled = event.currentTarget.checked;
+      });
+      const timeLimitInput = document.getElementById("time-limit-input");
+      timeLimitInput?.addEventListener("change", (event) => {
+        const value = Number(event.currentTarget.value);
+        if (!Number.isFinite(value)) return;
+        nextQuestionTimeLimitSeconds = clampQuestionTimeLimit(Math.round(value));
+        event.currentTarget.value = nextQuestionTimeLimitSeconds;
       });
       restartBtn.focus();
     }
@@ -872,9 +872,58 @@
     function restartQuiz() {
       stopQuestionTimer();
       stopQuestionAdvance();
+      timedModeEnabled = nextTimedModeEnabled;
+      questionTimeLimitSeconds = nextQuestionTimeLimitSeconds;
       currentIndex = 0;
       score = 0;
       renderQuestion();
+    }
+
+    function renderStartScreen() {
+      quizCard.classList.remove("shake");
+      quizCard.innerHTML = `
+        <header class="header">
+          <h1 class="title">Space Exploration Quiz</h1>
+          <div class="meta">
+            <span>10 questions</span>
+            <span>Choose your challenge</span>
+          </div>
+          <label class="mode-toggle">
+            <input id="timed-toggle-start" type="checkbox" ${nextTimedModeEnabled ? "checked" : ""} />
+            <span>Timed Challenge</span>
+          </label>
+          <label class="mode-toggle">
+            <span>Seconds per question (3-60):</span>
+            <input id="time-limit-start" type="number" min="3" max="60" step="1" value="${nextQuestionTimeLimitSeconds}" />
+          </label>
+          <div class="progress-track" aria-label="Quiz progress">
+            <div class="progress-fill" style="width: 0%"></div>
+          </div>
+        </header>
+        <section class="results">
+          <p class="result-note">Set your mode, then launch your mission. Mode changes apply when you start or restart.</p>
+          <div class="actions">
+            <button id="start-btn" class="primary-btn">Start Quiz</button>
+          </div>
+        </section>
+      `;
+
+      const timedToggleStart = document.getElementById("timed-toggle-start");
+      timedToggleStart?.addEventListener("change", (event) => {
+        nextTimedModeEnabled = event.currentTarget.checked;
+      });
+
+      const timeLimitStart = document.getElementById("time-limit-start");
+      timeLimitStart?.addEventListener("change", (event) => {
+        const value = Number(event.currentTarget.value);
+        if (!Number.isFinite(value)) return;
+        nextQuestionTimeLimitSeconds = clampQuestionTimeLimit(Math.round(value));
+        event.currentTarget.value = nextQuestionTimeLimitSeconds;
+      });
+
+      const startBtn = document.getElementById("start-btn");
+      startBtn?.addEventListener("click", restartQuiz);
+      startBtn?.focus();
     }
 
     function wait(ms) {
@@ -937,7 +986,7 @@
     if (selfTestMode) {
       runSelfTests();
     } else {
-      renderQuestion();
+      renderStartScreen();
     }
   </script>
 </body>
