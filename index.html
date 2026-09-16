@@ -587,6 +587,7 @@
     let timedModeEnabled = false;
     let questionTimeLimitSeconds = 12;
     let questionTimerId = null;
+    let questionAdvanceTimeoutId = null;
     let timerDeadlineMs = 0;
 
     const postAnswerDelayMs = 950;
@@ -626,6 +627,25 @@
       if (!questionTimerId) return;
       clearInterval(questionTimerId);
       questionTimerId = null;
+    }
+
+    function stopQuestionAdvance() {
+      if (!questionAdvanceTimeoutId) return;
+      clearTimeout(questionAdvanceTimeoutId);
+      questionAdvanceTimeoutId = null;
+    }
+
+    function scheduleQuestionAdvance() {
+      stopQuestionAdvance();
+      questionAdvanceTimeoutId = setTimeout(() => {
+        questionAdvanceTimeoutId = null;
+        currentIndex += 1;
+        if (currentIndex < questions.length) {
+          renderQuestion();
+        } else {
+          renderResults();
+        }
+      }, postAnswerDelayMs);
     }
 
     function updateTimerDisplay(secondsLeft) {
@@ -788,14 +808,7 @@
         feedback.textContent = `❌ Not quite. Correct answer: ${item.options[item.answer]}`;
       }
 
-      setTimeout(() => {
-        currentIndex += 1;
-        if (currentIndex < questions.length) {
-          renderQuestion();
-        } else {
-          renderResults();
-        }
-      }, postAnswerDelayMs);
+      scheduleQuestionAdvance();
     }
 
     function handleTimeout() {
@@ -811,14 +824,7 @@
       feedback.className = "feedback show bad";
       feedback.textContent = timeoutFeedbackText(item.options[item.answer]);
 
-      setTimeout(() => {
-        currentIndex += 1;
-        if (currentIndex < questions.length) {
-          renderQuestion();
-        } else {
-          renderResults();
-        }
-      }, postAnswerDelayMs);
+      scheduleQuestionAdvance();
     }
 
     function renderResults() {
@@ -865,6 +871,7 @@
 
     function restartQuiz() {
       stopQuestionTimer();
+      stopQuestionAdvance();
       currentIndex = 0;
       score = 0;
       renderQuestion();
