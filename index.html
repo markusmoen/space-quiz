@@ -137,6 +137,54 @@
       transition: width 320ms ease;
     }
 
+    .mode-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin: 10px 0 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      user-select: none;
+      cursor: pointer;
+    }
+
+    .mode-toggle input {
+      margin: 0;
+      accent-color: var(--accent);
+    }
+
+    .timer-wrap {
+      margin-top: 8px;
+      margin-bottom: 2px;
+    }
+
+    .timer-wrap.hidden {
+      display: none;
+    }
+
+    .timer-status {
+      font-size: 0.9rem;
+      font-weight: 620;
+      color: color-mix(in oklab, var(--bad), var(--text) 30%);
+      margin-bottom: 6px;
+    }
+
+    .timer-track {
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: color-mix(in oklab, var(--bad), var(--surface) 84%);
+      overflow: hidden;
+    }
+
+    .timer-fill {
+      height: 100%;
+      width: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, color-mix(in oklab, var(--bad), var(--accent) 35%), var(--bad));
+      transition: width 180ms linear;
+    }
+
     .question {
       margin: 10px 0 14px;
       font-size: 1.08rem;
@@ -536,6 +584,12 @@
     let currentIndex = 0;
     let score = 0;
     let answerLocked = false;
+    let timedModeEnabled = false;
+    let questionTimeLimitSeconds = 12;
+    let questionTimerId = null;
+    let timerDeadlineMs = 0;
+
+    const postAnswerDelayMs = 950;
 
     const resultMessage = (finalScore) => {
       if (finalScore === 10) return "Perfect mission! You’re a cosmic expert.";
@@ -560,6 +614,58 @@
     };
 
     const progressPct = () => (currentIndex / questions.length) * 100;
+    const countdownPct = (secondsLeft) => Math.max(0, Math.min(100, (secondsLeft / questionTimeLimitSeconds) * 100));
+    const timeoutFeedbackText = (answerText) => `⏱️ Time's up. Correct answer: ${answerText}`;
+    const timerStatusText = (secondsLeft) => `Time left: ${secondsLeft}s`;
+
+    function remainingSeconds(deadlineMs, nowMs) {
+      return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+    }
+
+    function stopQuestionTimer() {
+      if (!questionTimerId) return;
+      clearInterval(questionTimerId);
+      questionTimerId = null;
+    }
+
+    function updateTimerDisplay(secondsLeft) {
+      const timerStatus = document.getElementById("timer-status");
+      const timerFill = document.getElementById("timer-fill");
+      if (!timerStatus || !timerFill) return;
+      timerStatus.textContent = timerStatusText(secondsLeft);
+      timerFill.style.width = `${countdownPct(secondsLeft)}%`;
+    }
+
+    function startQuestionTimer() {
+      stopQuestionTimer();
+      if (!timedModeEnabled || answerLocked) return;
+
+      timerDeadlineMs = Date.now() + (questionTimeLimitSeconds * 1000);
+      updateTimerDisplay(questionTimeLimitSeconds);
+
+      let previousSecondsLeft = questionTimeLimitSeconds;
+      questionTimerId = setInterval(() => {
+        const secondsLeft = remainingSeconds(timerDeadlineMs, Date.now());
+        if (secondsLeft !== previousSecondsLeft) {
+          previousSecondsLeft = secondsLeft;
+          updateTimerDisplay(secondsLeft);
+        }
+
+        if (secondsLeft <= 0) {
+          stopQuestionTimer();
+          handleTimeout();
+        }
+      }, 200);
+    }
+
+    function setTimedMode(enabled) {
+      timedModeEnabled = enabled;
+      if (!timedModeEnabled) {
+        stopQuestionTimer();
+      } else if (!answerLocked) {
+        startQuestionTimer();
+      }
+    }
 
     function renderQuestion() {
       const item = questions[currentIndex];
@@ -573,8 +679,18 @@
             <span>Question ${currentIndex + 1} / ${questions.length}</span>
             <span>Score: ${score}</span>
           </div>
+          <label class="mode-toggle">
+            <input id="timed-toggle" type="checkbox" ${timedModeEnabled ? "checked" : ""} />
+            <span>Timed Challenge (${questionTimeLimitSeconds}s)</span>
+          </label>
           <div class="progress-track" aria-label="Quiz progress">
             <div class="progress-fill" style="width: ${progressPct()}%"></div>
+          </div>
+          <div class="timer-wrap ${timedModeEnabled ? "" : "hidden"}" aria-live="polite">
+            <div id="timer-status" class="timer-status">${timerStatusText(questionTimeLimitSeconds)}</div>
+            <div class="timer-track" aria-hidden="true">
+              <div id="timer-fill" class="timer-fill"></div>
+            </div>
           </div>
         </header>
         <section>
@@ -592,6 +708,20 @@
         btn.addEventListener("click", () => handleAnswer(btn));
         btn.addEventListener("keydown", handleAnswerKeyControls);
       });
+
+      const timedToggle = document.getElementById("timed-toggle");
+      timedToggle?.addEventListener("change", (event) => {
+        setTimedMode(event.currentTarget.checked);
+        const timerWrap = quizCard.querySelector(".timer-wrap");
+        timerWrap?.classList.toggle("hidden", !timedModeEnabled);
+        updateTimerDisplay(questionTimeLimitSeconds);
+      });
+
+      if (timedModeEnabled) {
+        startQuestionTimer();
+      } else {
+        stopQuestionTimer();
+      }
 
       quizCard.querySelector(".answer-btn")?.focus();
     }
@@ -634,6 +764,7 @@
     function handleAnswer(button) {
       if (answerLocked) return;
       answerLocked = true;
+      stopQuestionTimer();
 
       const selected = Number(button.dataset.idx);
       const item = questions[currentIndex];
@@ -664,10 +795,34 @@
         } else {
           renderResults();
         }
-      }, 950);
+      }, postAnswerDelayMs);
+    }
+
+    function handleTimeout() {
+      if (answerLocked) return;
+      answerLocked = true;
+
+      const item = questions[currentIndex];
+      const allButtons = [...quizCard.querySelectorAll(".answer-btn")];
+      const feedback = document.getElementById("feedback");
+      allButtons.forEach((btn) => (btn.disabled = true));
+      allButtons[item.answer].classList.add("correct");
+      quizCard.classList.add("shake");
+      feedback.className = "feedback show bad";
+      feedback.textContent = timeoutFeedbackText(item.options[item.answer]);
+
+      setTimeout(() => {
+        currentIndex += 1;
+        if (currentIndex < questions.length) {
+          renderQuestion();
+        } else {
+          renderResults();
+        }
+      }, postAnswerDelayMs);
     }
 
     function renderResults() {
+      stopQuestionTimer();
       const pct = Math.round((score / questions.length) * 100);
       const isCelebration = score >= 8;
       const isSad = score < 3;
@@ -680,6 +835,10 @@
             <span>Final score</span>
             <span>${score} / ${questions.length}</span>
           </div>
+          <label class="mode-toggle">
+            <input id="timed-toggle-results" type="checkbox" ${timedModeEnabled ? "checked" : ""} />
+            <span>Timed Challenge (${questionTimeLimitSeconds}s)</span>
+          </label>
           <div class="progress-track" aria-label="Quiz progress">
             <div class="progress-fill" style="width: 100%"></div>
           </div>
@@ -697,17 +856,82 @@
 
       const restartBtn = document.getElementById("restart-btn");
       restartBtn.addEventListener("click", restartQuiz);
+      const timedToggleResults = document.getElementById("timed-toggle-results");
+      timedToggleResults?.addEventListener("change", (event) => {
+        setTimedMode(event.currentTarget.checked);
+      });
       restartBtn.focus();
     }
 
     function restartQuiz() {
+      stopQuestionTimer();
       currentIndex = 0;
       score = 0;
       renderQuestion();
     }
 
-    renderQuestion();
+    function wait(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    function renderSelfTestResults(results) {
+      const passedCount = results.filter((test) => test.passed).length;
+      const summary = `${passedCount}/${results.length} tests passed`;
+      quizCard.innerHTML = `
+        <header class="header">
+          <h1 class="title">Self-test results</h1>
+          <div class="meta">
+            <span>${summary}</span>
+            <span>${passedCount === results.length ? "✅" : "❌"}</span>
+          </div>
+        </header>
+        <section class="results ${passedCount === results.length ? "celebration" : "sad"}">
+          <p class="result-note">${results.map((test) => `${test.passed ? "✅" : "❌"} ${test.name}`).join("<br>")}</p>
+        </section>
+      `;
+    }
+
+    async function runSelfTests() {
+      const results = [];
+      const assert = (name, passed) => results.push({ name, passed: Boolean(passed) });
+
+      questionTimeLimitSeconds = 2;
+      timedModeEnabled = true;
+      currentIndex = 0;
+      score = 0;
+      answerLocked = false;
+      renderQuestion();
+
+      assert("timer is visible in timed mode", Boolean(document.getElementById("timer-status")));
+      assert("countdown text is readable", document.getElementById("timer-status")?.textContent?.startsWith("Time left:"));
+
+      const firstAnswer = quizCard.querySelector(".answer-btn");
+      firstAnswer?.click();
+      await wait(80);
+      assert("timer stops when answer is selected", questionTimerId === null);
+
+      restartQuiz();
+      questionTimeLimitSeconds = 1;
+      timedModeEnabled = true;
+      renderQuestion();
+      await wait(1200);
+
+      const feedbackText = document.getElementById("feedback")?.textContent ?? "";
+      assert("timeout shows incorrect feedback", feedbackText.includes("Time's up"));
+
+      await wait(postAnswerDelayMs + 120);
+      assert("timeout advances to next question", currentIndex === 1);
+      stopQuestionTimer();
+      renderSelfTestResults(results);
+    }
+
     document.addEventListener("keydown", handleNumberShortcut);
+    const selfTestMode = new URLSearchParams(window.location.search).get("self-test") === "1";
+    if (selfTestMode) {
+      runSelfTests();
+    } else {
+      renderQuestion();
+    }
   </script>
 </body>
 </html>
